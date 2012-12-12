@@ -1,0 +1,88 @@
+#!/bin/bash
+FCSH="fcsh"
+TMP_DIR="/tmp"
+
+
+if [ "$1" == "mxmlc" ]; then
+	echo "$@"
+	SUM=`echo "$@" | md5sum | awk '{print $1}'`
+	echo $SUM
+else
+	if [ "$1" == "stop" ]; then
+		trap "echo exiting all fcshc" SIGTERM
+		rm -rf /tmp/fcshc.lock.*
+		killall fcshc
+	fi
+	exit 0
+fi
+
+LOCK_DIR="$TMP_DIR/fcshc.lock.$SUM"
+FCSH_PID="$LOCK_DIR/fcsh.pid"
+SHELL_PID="$LOCK_DIR/shell.pid"
+PIPE_IN="$LOCK_DIR/pipe.in"
+PIPE_OUT="$LOCK_DIR/pipe.out"
+FIRST_RUN=1
+
+
+if [ ! -d $LOCK_DIR ]; then
+	mkdir -p $LOCK_DIR
+	FIRST_RUN=0
+fi
+
+
+function create_pipes {
+	if [ ! -p $PIPE_IN ]; then
+		mkfifo $PIPE_IN
+	fi
+
+	if [ ! -p $PIPE_OUT ]; then
+		mkfifo $PIPE_OUT
+	fi
+}
+
+
+function fcsh_runner {
+while true; do
+	read line < $PIPE_IN
+	echo $line
+done | $FCSH 2>&1 > $PIPE_OUT &
+}
+
+
+function stop_runner {
+	killall fcshc.sh
+	kill -9 $1
+}
+
+
+function reading_output {
+	echo -e "\n"
+	while true; do
+		read line < $PIPE_OUT
+		echo $line
+	done | cat  &
+}
+
+
+create_pipes
+
+if [ -f $FCSH_PID ]; then
+	read pid < $FCSH_PID
+else
+	pid=0
+fi
+
+
+if [ -f /proc/$pid/exe ]; then
+	echo "compile 1" > $PIPE_IN
+	#TODO lock output to end of compilation
+	#reading_output
+else
+	fcsh_runner
+	reading_output
+	echo $@ > $PIPE_IN
+	echo $! > $FCSH_PID
+fi
+
+
+
